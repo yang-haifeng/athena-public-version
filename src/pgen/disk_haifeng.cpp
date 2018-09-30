@@ -40,6 +40,7 @@
 #include "../eos/eos.hpp"
 #include "../bvals/bvals.hpp"
 #include "../field/field.hpp"
+#include "../field/field_diffusion/field_diffusion.hpp"
 #include "../coordinates/coordinates.hpp"
 #include "../utils/utils.hpp"
 
@@ -59,6 +60,11 @@ void DiskInnerX1(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceF
 void DiskOuterX1(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceField &b,
   Real time, Real dt, int is, int ie, int js, int je, int ks, int ke, int ngh);
 
+// User-defined Diffusion
+void ConstantAMDiffusivity(FieldDiffusion *pfdif, MeshBlock *pmb, const AthenaArray<Real> &w,
+     const AthenaArray<Real> &bmag, const int is, const int ie, const int js, 
+     const int je, const int ks, const int ke);
+
 // problem parameters
 static Real GM=0.0,R0=1.0,Rbuf;
 static Real rho0,alpha,rho_floor;
@@ -77,7 +83,7 @@ static int finest_lev;
 void Mesh::InitUserMeshData(ParameterInput *pin)
 {
   // Get parameters for grav terms and radii
-  GM = pin->GetOrAddReal("problem","GM", 0.0);
+  GM = pin->GetOrAddReal("problem","GM", 1.0);
   R0 = pin->GetOrAddReal("problem","R0", 1.0);
   //Rdisk = pin->GetReal("problem","Rdisk");
   Rbuf = pin->GetOrAddReal("problem","Rbuf",2.0);
@@ -96,7 +102,7 @@ void Mesh::InitUserMeshData(ParameterInput *pin)
   // Get B field related parameters
   Bz0 = pin->GetOrAddReal("problem","Bz0",0.0);
   mu  = pin->GetReal("problem","mu");
-  Am0 = pin->GetOrAddReal("problem","Am0",1.0);
+  Am0 = pin->GetOrAddReal("problem","Am0",0.0);
   lHoH0 = pin->GetOrAddReal("problem","lHoH0",10.0);
   res_scale = pin->GetOrAddReal("problem","res_scale",0.2);
   taddBp = pin->GetOrAddReal("problem","taddBp",0.0);
@@ -187,6 +193,9 @@ void Mesh::InitUserMeshData(ParameterInput *pin)
 // enroll user-defined physical source terms
   EnrollUserExplicitSourceFunction(MySource);
 
+// enroll user-defined field diffusion 
+  EnrollFieldDiffusivity(ConstantAMDiffusivity);
+
   return;
 }
 
@@ -231,7 +240,6 @@ void MeshBlock::InitUserMeshBlockData(ParameterInput *pin)
 //! \fn static Real CompressedX2(Real x, RegionSize rs)
 //  \brief Increase the theta grid size towards the pole
 Real CompressedX2(Real x, RegionSize rs) 
-// This compressedX2 doesn't respect x2min or x2max
 {
   //std::cout<<"CompressedX2 called"<<std::endl;
   Real x2mid = 0.5*PI;
@@ -291,7 +299,6 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin)
     {
       Real RBmin = 0.;
       Real Phimin = 2.0/(3.0-alpha)*Bz0*pow(RBmin/R0,1.0-0.5*(alpha-1.0));
-      std::cout<<Bz0<<std::endl<<std::endl;
 
 #pragma omp for schedule(static)
       for (int j=js; j<=je+1; ++j) {
@@ -401,17 +408,32 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin)
         Real x1 = pcoord->x1v(i);
         Real myamp = x1 > Rbuf ? amp : 0.0;
 
-        //Real Rcut = 10;
+        Real Rcut = 10;
+	Real pfac = exp( -x1*x1/Rcut/Rcut );
+	//Real pfac = 1.;
         //Real rho = rho0*pow(x1/R0,-alpha)*f*exp( -x1*x1/Rcut/Rcut ); 
 	  // add extra exp( -(R/Rcut)**2 ) term
-        Real rho = rho0*pow(x1/R0,-alpha)*f; 
+        Real rho = rho0*pow(x1/R0,-alpha)*f*pfac; 
 	//std::cout<<f<<std::endl;
+
+	bool bDfloor = false;
+	if (rho<rho_floor){
+	  rho = rho_floor;
+	  bDfloor = true;
+	}
 
         Real cs  = sqrt((GM/x1)*gc);
         phydro->u(IDN,k,j,i) = rho;
-        phydro->u(IM1,k,j,i) = rho*cs*myamp*(ran2(&iseed)-0.5);
-        phydro->u(IM2,k,j,i) = rho*cs*myamp*(ran2(&iseed)-0.5);
-        phydro->u(IM3,k,j,i) = rho*sqrt(GM*(1.0-(alpha+1.0)*gc)/x1);
+	if (bDfloor){
+          phydro->u(IM1,k,j,i) = rho*cs*myamp*(ran2(&iseed)-0.5);
+          phydro->u(IM2,k,j,i) = rho*cs*myamp*(ran2(&iseed)-0.5);
+          phydro->u(IM3,k,j,i) = rho*cs*myamp*(ran2(&iseed)-0.5);
+	}
+	else{
+          phydro->u(IM1,k,j,i) = rho*cs*myamp*(ran2(&iseed)-0.5);
+          phydro->u(IM2,k,j,i) = rho*cs*myamp*(ran2(&iseed)-0.5);
+          phydro->u(IM3,k,j,i) = rho*sqrt(GM*(1.0-(alpha+1.0)*gc)/x1);
+	}
         Real pressure = rho*SQR(cs);
         if(NON_BAROTROPIC_EOS)
           phydro->u(IEN,k,j,i)= pressure/(peos->GetGamma()-1.0)
@@ -449,6 +471,8 @@ void MySource(MeshBlock *pmb, const Real time, const Real dt, const AthenaArray<
   int is = pmb->is; int js = pmb->js; int ks = pmb->ks;
   int ie = pmb->ie; int je = pmb->je; int ke = pmb->ke;
 
+  //Real g = pmb->peos->GetGamma();
+
   for (int k=ks; k<=ke; ++k){
 #pragma omp for schedule(static)
    for (int j=js; j<=je; ++j){
@@ -456,6 +480,10 @@ void MySource(MeshBlock *pmb, const Real time, const Real dt, const AthenaArray<
      for (int i=is; i<=ie; ++i){
        Real x1   = pmb->pcoord->x1v(i);
        u(IDN,k,j,i) = std::max(u(IDN,k,j,i), rho_floor*pow(x1/R0,-alpha));
+
+       //Real temp = (g-1.0)*prim(IEN,k,j,i)/prim(IDN,k,j,i);
+       //Real Omega = sqrt(GM/x1/x1/x1);
+       //cons(IEN,k,j,i) -= dt*prim(IDN,k,j,i)*(temp - 10.0)/(g-1.0)*Omega;
   }}}
   return;
 }
@@ -647,12 +675,17 @@ void MeshBlock::UserWorkInLoop()
 
         // apply density floor and Alfven limiter
         Real rhonew0 = std::max(rho, rho_floor*pow(x1/R0,-alpha));
-        Real b1   = pfield->bcc(IB1,k,j,i);
-        Real b2   = pfield->bcc(IB2,k,j,i);
-        Real b3   = pfield->bcc(IB3,k,j,i);
-        Real bsq  = SQR(b1)+SQR(b2)+SQR(b3);
-        Real vA2  = bsq/rhonew0;
-        Real enhac= vA2 < SQR(2.0*x1) ? 1.0 : vA2/SQR(2.0*x1);
+	Real bsq=0,enhac;
+	if (MAGNETIC_FIELDS_ENABLED){
+          Real b1   = pfield->bcc(IB1,k,j,i);
+          Real b2   = pfield->bcc(IB2,k,j,i);
+          Real b3   = pfield->bcc(IB3,k,j,i);
+          Real bsq  = SQR(b1)+SQR(b2)+SQR(b3);
+          Real vA2  = bsq/rhonew0;
+          enhac= vA2 < SQR(2.0*x1) ? 1.0 : vA2/SQR(2.0*x1);
+	}
+	else
+          enhac= 1.0;
         Real rhonew = rhonew0*(1.0+(enhac-1.0)*std::min(facR,1.0));
 
         // update primitive and conserved variables
@@ -788,3 +821,85 @@ void AddPoloidalField(MeshBlock *pmb)
 
   return;
 }
+
+//--------------------------------------------------------------------------------------
+//! \fn void ConstantAMDiffusivity(FieldDiffusion *pfdif, MeshBlock *pmb, const AthenaArray<Real> &w,
+//     const AthenaArray<Real> &bmag, const int is, const int ie, const int js, 
+//     const int je, const int ks, const int ke) {
+//  \brief Calculate the Diffusivity based on AD Elsässer number Am being 
+//     constant.
+void ConstantAMDiffusivity(FieldDiffusion *pfdif, MeshBlock *pmb, const AthenaArray<Real> &w,
+     const AthenaArray<Real> &bmag, const int is, const int ie, const int js, 
+     const int je, const int ks, const int ke) {
+
+  // Ohmic resistivity is copied from ConstDiffusivity without any modifications
+  if (pfdif->eta_ohm > 0.0) { // Ohmic resistivity is turned on
+    for(int k=ks; k<=ke; k++) {
+      for(int j=js; j<=je; j++) {
+#pragma omp simd
+        for(int i=is; i<=ie; i++)
+          pfdif->etaB(I_O, k,j,i) = pfdif->eta_ohm;
+      }   
+    }   
+  }
+
+  Real vA, x1, delta, Omega, eta_ad, Am;
+  if ( Am0 > 0.0 ) { // ambipolar diffusivity is turned on
+    for(int k=ks; k<=ke; k++) {
+      for(int j=js; j<=je; j++) {
+#pragma omp simd
+	delta = fabs(pmb->pcoord->x2v(j) - 0.5*PI);
+        for(int i=is; i<=ie; i++){
+	  if (delta<0.2)
+	    Am = Am0;
+	  else{
+	    Real tw = exp(-(delta-0.2));
+	    Am = Am0 *tw + 100 * (1-tw);
+	  }
+	  vA = bmag(k,j,i) / sqrt( w(IDN,k,j,i) );
+          x1 = pmb->pcoord->x1v(i);
+	  Omega = sqrt( GM/x1/x1/x1 );
+	  eta_ad = SQR(vA)/Am/Omega;
+          //pfdif->etaB(I_A, k,j,i) = eta_ad*SQR(bmag(k,j,i));
+          pfdif->etaB(I_A, k,j,i) = eta_ad;
+	}
+      }
+    }
+  }
+
+//if (pfdif->eta_hall != 0.0) { // Hall diffusivity is turned on
+//  for(int k=ks; k<=ke; k++) {
+//    for(int j=js; j<=je; j++) {
+//#pragma omp simd
+//      for(int i=is; i<=ie; i++)
+//        pfdif->etaB(I_H, k,j,i) = pfdif->eta_hall*bmag(k,j,i)/w(IDN,k,j,i);
+//    }   
+//  }   
+//}
+
+  return;
+
+}
+
+//! \fn void MeshBlock::UserWorkBeforeOutput(ParameterInput *pin)
+//  \brief Calculate the User defined output values.
+//     uov 0: Poloidal Magnetic flux
+//     uov 1: Plasma beta
+//void MeshBlock::UserWorkBeforeOutput(ParameterInput *pin)
+//{
+//  for(int k=ks; k<=ke; k++) {
+//    for(int j=js; j<=je; j++) {
+//      Real Phi = 0.0;
+//      for(int i=is; i<=ie; i++) {
+//        Real r1 = pcoord->x1v(i);
+//        Real r2 = pcoord->x1v(i+1);
+//	Phi += PI*(SQR(r2)-SQR(r1))* pfield->bcc(IB2,k,j,i);
+//        Real pmag = 0.5*(SQR(pfield->bcc(IB1,k,j,i))
+//                        +SQR(pfield->bcc(IB2,k,j,i))
+//                        +SQR(pfield->bcc(IB3,k,j,i)));
+//        user_out_var(0,k,j,i) = Phi; // Set as 0 for now.
+//        user_out_var(1,k,j,i) = phydro->w(IPR,k,j,i)/pmag;
+//      }
+//    }
+//  }
+//}
