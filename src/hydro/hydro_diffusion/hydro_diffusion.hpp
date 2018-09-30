@@ -23,7 +23,7 @@ class HydroDiffusion;
 void ConstViscosity(HydroDiffusion *phdif, MeshBlock *pmb, const AthenaArray<Real> &w,
     const AthenaArray<Real> &bc, int is, int ie, int js, int je, int ks, int ke);
 
-void  ConstConduction(HydroDiffusion *phdif, MeshBlock *pmb, const AthenaArray<Real> &w,
+void ConstConduction(HydroDiffusion *phdif, MeshBlock *pmb, const AthenaArray<Real> &w,
     const AthenaArray<Real> &bc, int is, int ie, int js, int je, int ks, int ke);
 
 
@@ -39,6 +39,7 @@ public:
 
   // data
   bool hydro_diffusion_defined;
+  bool hydro_diffusion_split, hydro_diffusion_embed;
   Real nu_iso, nu_aniso; // viscosity coeff
   AthenaArray<Real> visflx[3]; // viscous stress tensor
   AthenaArray<Real> nu; // viscosity array

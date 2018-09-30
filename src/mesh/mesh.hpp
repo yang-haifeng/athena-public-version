@@ -23,6 +23,7 @@
 #include "../bvals/bvals.hpp"
 #include "meshblock_tree.hpp"
 #include "mesh_refinement.hpp"
+#include "diffusion_driver.hpp"
 
 // Forward declarations
 class ParameterInput;
@@ -117,6 +118,7 @@ private:
   // data
   Real cost;
   Real new_block_dt;
+  Real new_block_physdt[NPHYS]; // timestep for extra physics
   TaskState tasks;
   int nreal_user_meshblock_data_, nint_user_meshblock_data_;
 
@@ -153,6 +155,7 @@ class Mesh {
   friend class Gravity;
   friend class HydroDiffusion;
   friend class FieldDiffusion;
+  friend class DiffusionDriver;
 #ifdef HDF5OUTPUT
   friend class ATHDF5Output;
 #endif
@@ -180,6 +183,7 @@ public:
 
   MeshBlock *pblock;
 
+  DiffusionDriver *pdiff;
   TurbulenceDriver *ptrbd;
   FFTGravityDriver *pfgrd;
   MGGravityDriver *pmgrd;
@@ -355,5 +359,4 @@ inline Real UniformMeshGeneratorX2(Real x, RegionSize rs) {
 inline Real UniformMeshGeneratorX3(Real x, RegionSize rs) {
   return static_cast<Real>(0.5)*(rs.x3min+rs.x3max) + (x*rs.x3max - x*rs.x3min);
 }
-
 #endif  // MESH_MESH_HPP_

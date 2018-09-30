@@ -126,22 +126,6 @@ Real Hydro::NewBlockTimeStep(void) {
     }
   }
 
-// calculate the timestep limited by the diffusion process
-  if (phdif->hydro_diffusion_defined) {
-    Real mindt_vis, mindt_cnd;
-    phdif->NewHydroDiffusionDt(mindt_vis, mindt_cnd);
-    min_dt = std::min(min_dt,mindt_vis);
-    min_dt = std::min(min_dt,mindt_cnd);
-  } // hydro diffusion
-
-  if(MAGNETIC_FIELDS_ENABLED &&
-     pmb->pfield->pfdif->field_diffusion_defined) {
-    Real mindt_oa, mindt_h;
-    pmb->pfield->pfdif->NewFieldDiffusionDt(mindt_oa, mindt_h);
-    min_dt = std::min(min_dt,mindt_oa);
-    min_dt = std::min(min_dt,mindt_h);
-  } // field diffusion
-
   min_dt *= pmb->pmy_mesh->cfl_number;
 
   if (UserTimeStep_!=NULL) {
@@ -149,5 +133,41 @@ Real Hydro::NewBlockTimeStep(void) {
   }
 
   pmb->new_block_dt=min_dt;
+
+  DiffusionDriver *pdiff = pmb->pmy_mesh->pdiff;
+  if (pdiff->diffusion_defined){
+    // field diffusion
+    if (pdiff->phys_def[OAD] || pdiff->phys_def[HALL]) {
+      FieldDiffusion *pfdif = pmb->pfield->pfdif;
+
+      // first, set magnetic diffusivities
+//      pfdif->SetFieldDiffusivity(w,bcc); // migrated to become a separate task
+
+      // calculate non-ideal MHD timestep
+      Real mindt_oa, mindt_h;
+      pfdif->NewFieldDiffusionDt(mindt_oa, mindt_h);
+
+      pmb->new_block_physdt[OAD]  = mindt_oa;//*pmb->pmy_mesh->cfl_number;
+      pmb->new_block_physdt[HALL] = mindt_h; //*pmb->pmy_mesh->cfl_number;
+    }
+
+    // viscosity and thermal conduction
+    if (pdiff->phys_def[ISO_VIS] || pdiff->phys_def[ISO_COND]) {
+      HydroDiffusion *phdif = pmb->phydro->phdif;
+
+      // set diffusion coeff
+//      phdif->SetHydroDiffusivity(w,bcc); // migrated to become a separate task
+
+      // calculate diffusion timestep
+      Real mindt_vis, mindt_cnd;
+      phdif->NewHydroDiffusionDt(mindt_vis, mindt_cnd);
+
+      pmb->new_block_physdt[ISO_VIS]  = mindt_vis;//*pmb->pmy_mesh->cfl_number;
+      pmb->new_block_physdt[ANI_VIS]  = pmb->new_block_physdt[ISO_VIS];
+      pmb->new_block_physdt[ISO_COND] = mindt_cnd;//*pmb->pmy_mesh->cfl_number;
+      pmb->new_block_physdt[ANI_COND] = pmb->new_block_physdt[ISO_COND];
+    }
+  }
+
   return min_dt;
 }

@@ -115,6 +115,9 @@ enum {IVX=1, IVY=2, IVZ=3, IPR=4, IBY=(NHYDRO), IBZ=((NHYDRO)+1)};
 // array indices for face-centered electric fields returned by Riemann solver
 enum {X1E2=0, X1E3=1, X2E3=0, X2E1=1, X3E1=0, X3E2=1};
 
+// array indices for various pieces of microphysics
+enum {ISO_VIS=0, ANI_VIS=1, ISO_COND=2, ANI_COND=3, COOL=4, OAD=5, HALL=6};
+
 // array indices for metric and triangular matrices in GR
 enum {I00, I01, I02, I03, I11, I12, I13, I22, I23, I33, NMETRIC};
 enum {T00, T10, T11, T20, T21, T22, T30, T31, T32, T33, NTRIANGULAR};

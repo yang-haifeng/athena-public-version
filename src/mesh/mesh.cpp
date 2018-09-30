@@ -45,6 +45,7 @@
 #include "mesh_refinement.hpp"
 #include "meshblock_tree.hpp"
 #include "mesh.hpp"
+#include "diffusion_driver.hpp"
 #include "../hydro/hydro_diffusion/hydro_diffusion.hpp"
 #include "../field/field_diffusion/field_diffusion.hpp"
 
@@ -463,6 +464,9 @@ Mesh::Mesh(ParameterInput *pin, int mesh_test) {
     if (Globals::my_rank==0) OutputMeshStructure(dim);
     return;
   }
+    
+  // set diffusion physics
+  pdiff = new DiffusionDriver(this, pin);
 
   // set gravity flag
   gflag=0;
@@ -775,6 +779,9 @@ Mesh::Mesh(ParameterInput *pin, IOWrapper& resfile, int mesh_test) {
     delete [] offset;
     return;
   }
+    
+  // set diffusion physics
+  pdiff = new DiffusionDriver(this, pin);
 
   // set gravity flag
   gflag=0;
@@ -848,6 +855,7 @@ Mesh::~Mesh() {
   delete [] ranklist;
   delete [] costlist;
   delete [] loclist;
+  delete pdiff;
   if (SELF_GRAVITY_ENABLED==1) delete pfgrd;
   else if (SELF_GRAVITY_ENABLED==2) delete pmgrd;
   if (turb_flag > 0) delete ptrbd;
@@ -1005,21 +1013,46 @@ void Mesh::OutputMeshStructure(int dim) {
 // \brief function that loops over all MeshBlocks and find new timestep
 //        this assumes that phydro->NewBlockTimeStep is already called
 
-void Mesh::NewTimeStep(void) {
+void Mesh::NewTimeStep(void) 
+{
+  Real min_dt[1+NPHYS];
+  int ndt = 1;
+
   MeshBlock *pmb = pblock;
-  Real min_dt=pmb->new_block_dt;
+  min_dt[0]=pmb->new_block_dt;
   pmb=pmb->next;
   while (pmb != NULL)  {
-    min_dt=std::min(min_dt,pmb->new_block_dt);
+    min_dt[0]=std::min(min_dt[0],pmb->new_block_dt);
     pmb=pmb->next;
   }
+
+  if(pdiff->diffusion_defined)
+  {
+    ndt += NPHYS;
+    pmb = pblock;
+    for (int i=0;i<NPHYS;++i)
+      min_dt[1+i] = pmb->new_block_physdt[i];
+
+    pmb=pmb->next;
+    while (pmb != NULL)  {
+      for (int i=0;i<NPHYS;++i)
+        min_dt[1+i]=std::min(min_dt[1+i],pmb->new_block_physdt[i]);
+      pmb=pmb->next;
+    }
+  }
+
 #ifdef MPI_PARALLEL
-  MPI_Allreduce(MPI_IN_PLACE,&min_dt,1,MPI_ATHENA_REAL,MPI_MIN,MPI_COMM_WORLD);
+  MPI_Allreduce(MPI_IN_PLACE,&min_dt,ndt,MPI_ATHENA_REAL,MPI_MIN,MPI_COMM_WORLD);
 #endif
   // set it
-  dt=std::min(min_dt,static_cast<Real>(2.0)*dt);
+  dt=std::min(min_dt[0],static_cast<Real>(2.0)*dt);
   if (time < tlim && tlim-time < dt)  // timestep would take us past desired endpoint
     dt = tlim-time;
+
+  // set diff_dt and adjust dt if needed
+  if(pdiff->diffusion_defined)
+    dt = pdiff->UpdateDtAndDiffDt(dt, min_dt);
+
   return;
 }
 

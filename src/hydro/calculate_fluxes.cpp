@@ -194,18 +194,22 @@ void Hydro::CalculateFluxes(AthenaArray<Real> &w, FaceField &b,
   if (SELF_GRAVITY_ENABLED) AddGravityFlux(); // add gravity flux directly
 
 // add diffusion fluxes
-  if (phdif->hydro_diffusion_defined) {
-    if (phdif->nu_iso > 0.0 || phdif->nu_aniso > 0.0)
+  if (phdif->hydro_diffusion_embed) {
+    DiffusionDriver *pdiff = pmb->pmy_mesh->pdiff;
+
+    if (((phdif->nu_iso > 0.0 || phdif->nu_aniso > 0.0)) &&
+        (pdiff->operator_split_def[ISO_VIS] || pdiff->operator_split_def[ANI_VIS]))
       phdif->AddHydroDiffusionFlux(phdif->visflx,flux);
 
     if (NON_BAROTROPIC_EOS) {
-      if (phdif->kappa_iso > 0.0 || phdif->kappa_aniso > 0.0)
+      if (((phdif->kappa_iso > 0.0 || phdif->kappa_aniso > 0.0)) &&
+          (pdiff->operator_split_def[ISO_COND] || pdiff->operator_split_def[ANI_COND]))
         phdif->AddHydroDiffusionEnergyFlux(phdif->cndflx,flux);
     }
   }
 
   if (MAGNETIC_FIELDS_ENABLED && NON_BAROTROPIC_EOS) {
-      if (pmb->pfield->pfdif->field_diffusion_defined)
+      if (pmb->pfield->pfdif->field_diffusion_embed)
         pmb->pfield->pfdif->AddPoyntingFlux(pmb->pfield->pfdif->pflux);
   }
 

@@ -38,6 +38,7 @@ public:
   // data
   MeshBlock* pmy_block;
   bool field_diffusion_defined;
+  bool field_diffusion_split, field_diffusion_embed;
   Real eta_ohm, eta_hall, eta_ad;
   AthenaArray<Real> etaB; // 4-dim array, covering O/H/A altogether
   EdgeField e_oa,e_h;     // edge-centered electric field from non-ideal MHD
@@ -51,6 +52,7 @@ public:
   void AddEMF(const EdgeField &e_src, EdgeField &e_des);
   void ClearEMF(EdgeField &e);
   void CalcCurrent(FaceField &b);
+  void PoyntingFlux(EdgeField &e, const AthenaArray<Real> &bcc);
   void AddPoyntingFlux (FaceField &p_src);
 
   // functions to calculate diffusivities and timesteps
@@ -61,9 +63,6 @@ public:
   void OhmicEMF(const FaceField &b, const AthenaArray<Real> &bc, EdgeField &e);
   //void HallEMF(const FaceField &b, const AthenaArray<Real> &bc, EdgeField &e);
   void AmbipolarEMF(const FaceField &b, const AthenaArray<Real> &bc, EdgeField &e);
-
-  // functions for energy flux
-  void PoyntingFlux(EdgeField &e, const AthenaArray<Real> &bcc);
 
 private:
   AthenaArray<Real> bmag_; // B field strength

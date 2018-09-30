@@ -642,7 +642,7 @@ enum TaskStatus TimeIntegratorTaskList::HydroDiffusion(MeshBlock *pmb, int stage
   Hydro *ph=pmb->phydro;
 
 // return if there are no diffusion to be added
-  if (ph->phdif->hydro_diffusion_defined == false) return TASK_NEXT;
+  if (ph->phdif->hydro_diffusion_embed == false) return TASK_NEXT;
 
   // *** this must be changed for the RK3 integrator
   if(stage <= nstages) {
@@ -660,7 +660,7 @@ enum TaskStatus TimeIntegratorTaskList::FieldDiffusion(MeshBlock *pmb, int stage
   Field *pf=pmb->pfield;
 
 // return if there are no diffusion to be added
-  if (pf->pfdif->field_diffusion_defined == false) return TASK_NEXT;
+  if (pf->pfdif->field_diffusion_embed == false) return TASK_NEXT;
 
   // *** this must be changed for the RK3 integrator
   if(stage <= nstages) {

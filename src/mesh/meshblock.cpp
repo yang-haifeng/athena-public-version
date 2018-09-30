@@ -12,6 +12,7 @@
 
 // C++ headers
 #include <algorithm>  // sort
+#include <cfloat>     // FLT_MAX
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -132,6 +133,9 @@ MeshBlock::MeshBlock(int igid, int ilid, LogicalLocation iloc, RegionSize input_
   phydro = new Hydro(this, pin);
   if (MAGNETIC_FIELDS_ENABLED) pfield = new Field(this, pin);
   peos = new EquationOfState(this, pin);
+
+  if (pm->pdiff->diffusion_defined)
+    for (int i=0; i<NPHYS; ++i) new_block_physdt[i]=FLT_MAX;
 
   // Create user mesh data
   InitUserMeshBlockData(pin);
@@ -272,6 +276,9 @@ MeshBlock::MeshBlock(int igid, int ilid, Mesh *pm, ParameterInput *pin,
            ruser_meshblock_data[n].GetSizeInBytes());
     os+=ruser_meshblock_data[n].GetSizeInBytes();
   }
+
+  if (pm->pdiff->diffusion_defined)
+    for (int i=0; i<NPHYS; ++i) new_block_physdt[i]=FLT_MAX;
 
   return;
 }

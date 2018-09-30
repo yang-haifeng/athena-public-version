@@ -21,9 +21,14 @@
 
 // FieldDiffusion constructor
 
-FieldDiffusion::FieldDiffusion(MeshBlock *pmb, ParameterInput *pin) {
+FieldDiffusion::FieldDiffusion(MeshBlock *pmb, ParameterInput *pin)
+{
+  Mesh *pm = pmb->pmy_mesh;
+  DiffusionDriver *pdif = pm->pdiff;
   pmy_block = pmb;
   field_diffusion_defined = false;
+  field_diffusion_split   = false;
+  field_diffusion_embed   = false;
 
   int ncells1 = pmb->block_size.nx1 + 2*(NGHOST);
   int ncells2 = 1, ncells3 = 1;
@@ -31,12 +36,19 @@ FieldDiffusion::FieldDiffusion(MeshBlock *pmb, ParameterInput *pin) {
   if (pmb->block_size.nx3 > 1) ncells3 = pmb->block_size.nx3 + 2*(NGHOST);
 
   // Check if field diffusion
-  eta_ohm = pin->GetOrAddReal("problem","eta_ohm",0.0);
-  eta_hall = pin->GetOrAddReal("problem","eta_hall",0.0);
-  eta_ad = pin->GetOrAddReal("problem","eta_ad",0.0);
+  eta_ohm = pin->GetOrAddReal("problem","eta_o",0.0);
+  eta_hall = pin->GetOrAddReal("problem","eta_h",0.0);
+  eta_ad = pin->GetOrAddReal("problem","eta_a",0.0);
 
   if ((eta_ohm != 0.0) || (eta_hall != 0.0) || (eta_ad != 0.0)) {
     field_diffusion_defined = true;
+
+    field_diffusion_split = (pdif->phys_def[OAD]  && pdif->operator_split_def[OAD])  ||
+                            (pdif->phys_def[HALL] && pdif->operator_split_def[HALL]);
+
+    field_diffusion_embed = (pdif->phys_def[OAD]  && !pdif->operator_split_def[OAD])  ||
+                            (pdif->phys_def[HALL] && !pdif->operator_split_def[HALL]);
+
     // Allocate memory for scratch vectors
     etaB.NewAthenaArray(3,ncells3,ncells2,ncells1);
     e_oa.x1e.NewAthenaArray(ncells3+1,ncells2+1,ncells1);
@@ -120,22 +132,32 @@ FieldDiffusion::~FieldDiffusion() {
 //  \brief Calculate diffusion EMF(Ohmic & Ambipolar for now)
 
 void FieldDiffusion::CalcFieldDiffusionEMF(FaceField &bi,
-     const AthenaArray<Real> &bc, EdgeField &e) {
+     const AthenaArray<Real> &bc, EdgeField &e) 
+{
   Field *pf = pmy_block->pfield;
   Hydro *ph = pmy_block->phydro;
   Mesh  *pm = pmy_block->pmy_mesh;
 
   if((eta_ohm==0.0) && (eta_ad==0.0)) return;
 
-  SetFieldDiffusivity(ph->w,pf->bcc);
+  SetFieldDiffusivity(ph->w,bc);
 
   CalcCurrent(bi);
   ClearEMF(e_oa);
   if (eta_ohm != 0.0) OhmicEMF(bi, bc, e_oa);
   if (eta_ad != 0.0) AmbipolarEMF(bi, bc, e_oa);
 
+  if (pm->pdiff->operator_split_def[OAD])
+    AddEMF(e_oa, pf->e);
+
   // calculate the Poynting flux pflux and add to energy flux in Hydro class
-  if (NON_BAROTROPIC_EOS) PoyntingFlux(e_oa, bc);
+  if (NON_BAROTROPIC_EOS) {
+    PoyntingFlux(e_oa, bc);
+
+    if (pm->pdiff->operator_split_def[OAD])
+      AddPoyntingFlux(pflux);
+  }
+
   return;
 }
 
@@ -183,38 +205,6 @@ void FieldDiffusion::ClearEMF(EdgeField &e) {
 #pragma omp simd
   for (int i=0; i<size3; ++i)
     e.x3e(i) = 0.0;
-
-  return;
-}
-
-
-//--------------------------------------------------------------------------------------
-// Set magnetic diffusion coefficients
-
-void FieldDiffusion::SetFieldDiffusivity(const AthenaArray<Real> &w,
-                                         const AthenaArray<Real> &bc) {
-  MeshBlock *pmb = pmy_block;
-  int il = pmb->is-NGHOST; int jl = pmb->js; int kl = pmb->ks;
-  int iu = pmb->ie+NGHOST; int ju = pmb->je; int ku = pmb->ke;
-  if (pmb->block_size.nx2 > 1) {
-    jl -= NGHOST; ju += NGHOST;
-  }
-  if (pmb->block_size.nx3 > 1) {
-    kl -= NGHOST; ku += NGHOST;
-  }
-
-  for (int k=kl; k<=ku; ++k) {
-    for (int j=jl; j<=ju; ++j) {
-#pragma omp simd
-      for (int i=il; i<=iu; ++i) {
-        Real Bsq = SQR(bc(IB1,k,j,i))+SQR(bc(IB2,k,j,i))
-                  +SQR(bc(IB3,k,j,i));
-        bmag_(k,j,i) = std::sqrt(Bsq);
-      }
-    }
-  }
-  // set diffusivities
-  CalcMagDiffCoeff_(this, pmb, w, bmag_, il, iu, jl, ju, kl, ku);
 
   return;
 }
@@ -322,11 +312,13 @@ void FieldDiffusion::NewFieldDiffusionDt(Real &dt_oa, Real &dt_h) {
         len(i) = (pmb->block_size.nx3 > 1) ? std::min(len(i),dx3(i)):len(i);
       }
       if ((eta_ohm > 0.0) || (eta_ad > 0.0)) {
+#pragma omp simd
         for (int i=is; i<=ie; ++i)
           dt_oa = std::min(dt_oa, static_cast<Real>(fac_oa*SQR(len(i))
                                              /(eta_t(i)+TINY_NUMBER)));
       }
       if (eta_hall > 0.0) {
+#pragma omp simd
         for (int i=is; i<=ie; ++i)
           dt_h = std::min(dt_h,static_cast<Real>(fac_h*SQR(len(i))
                        /(std::fabs(etaB(I_H,k,j,i))+TINY_NUMBER)));

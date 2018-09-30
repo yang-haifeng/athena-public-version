@@ -24,8 +24,12 @@
 HydroDiffusion::HydroDiffusion(Hydro *phyd, ParameterInput *pin) {
   pmy_hydro_ = phyd;
   pmb_ = pmy_hydro_->pmy_block;
+  Mesh *pm = pmb_->pmy_mesh;
+  DiffusionDriver *pdif = pm->pdiff;
   pco_ = pmb_->pcoord;
   hydro_diffusion_defined = false;
+  hydro_diffusion_split   = false;
+  hydro_diffusion_embed   = false;
 
   int ncells1 = pmb_->block_size.nx1 + 2*(NGHOST);
   int ncells2 = 1, ncells3 = 1;
@@ -83,6 +87,15 @@ HydroDiffusion::HydroDiffusion(Hydro *phyd, ParameterInput *pin) {
     dx3_.NewAthenaArray(ncells1);
     nu_tot_.NewAthenaArray(ncells1);
     kappa_tot_.NewAthenaArray(ncells1);
+
+    hydro_diffusion_split = (pdif->phys_def[ISO_VIS]  && pdif->operator_split_def[ISO_VIS])  ||
+                            (pdif->phys_def[ISO_COND] && pdif->operator_split_def[ISO_COND]) ||
+                            (pdif->phys_def[COOL]     && pdif->operator_split_def[COOL]);
+
+    hydro_diffusion_embed = (pdif->phys_def[ISO_VIS]  && !pdif->operator_split_def[ISO_VIS])  ||
+                            (pdif->phys_def[ISO_COND] && !pdif->operator_split_def[ISO_COND]) ||
+                            (pdif->phys_def[COOL]     && !pdif->operator_split_def[COOL]);
+
   }
 }
 
@@ -131,13 +144,22 @@ void HydroDiffusion::CalcHydroDiffusionFlux(const AthenaArray<Real> &prim,
   SetHydroDiffusivity(ph->w,pf->bcc);
 
   if (nu_iso > 0.0 || nu_aniso > 0.0) ClearHydroFlux(visflx);
-  if (nu_iso > 0.0) ViscousFlux_iso(prim, cons, visflx);
+  if (nu_iso > 0.0)   ViscousFlux_iso(prim, cons, visflx);
   if (nu_aniso > 0.0) ViscousFlux_aniso(prim, cons, visflx);
 
   if (kappa_iso > 0.0 || kappa_aniso > 0.0) ClearHydroFlux(cndflx);
-  if (kappa_iso > 0.0) ThermalFlux_iso(prim, cons, cndflx);
+  if (kappa_iso > 0.0)   ThermalFlux_iso(prim, cons, cndflx);
   if (kappa_aniso > 0.0) ThermalFlux_aniso(prim, cons, cndflx);
 
+  Mesh *pm = pmb_->pmy_mesh;
+  if (pm->pdiff->operator_split_def[ISO_VIS] ||
+      pm->pdiff->operator_split_def[ANI_VIS]) {
+    AddHydroDiffusionFlux(visflx,flux);
+  }
+
+  if (pm->pdiff->operator_split_def[ISO_COND] ||
+      pm->pdiff->operator_split_def[ANI_COND])
+    AddHydroDiffusionEnergyFlux(cndflx,flux);
 
   return;
 }
@@ -270,7 +292,6 @@ void HydroDiffusion::NewHydroDiffusionDt(Real &dt_vis, Real &dt_cnd) {
 
   dt_vis = (FLT_MAX);
   dt_cnd = (FLT_MAX);
-
 
   AthenaArray<Real> nu_t;
   nu_t.InitWithShallowCopy(nu_tot_);

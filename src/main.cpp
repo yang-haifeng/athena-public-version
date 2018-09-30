@@ -40,6 +40,7 @@
 #include "outputs/io_wrapper.hpp"
 #include "outputs/outputs.hpp"
 #include "parameter_input.hpp"
+#include "task_list/operator_split.hpp"
 #include "utils/utils.hpp"
 
 // MPI/OpenMP headers
@@ -308,6 +309,22 @@ int main(int argc, char *argv[]) {
     return(0);
   }
 
+  OperatorSplitTaskList *poslist;
+  if (pmesh->pdiff->diffusion_defined && pmesh->pdiff->operator_split) {
+    try {
+      poslist = new OperatorSplitTaskList(pinput, pmesh);
+    }
+    catch(std::bad_alloc& ba) {
+      std::cout << "### FATAL ERROR in main" << std::endl << "memory allocation failed "
+                << "in creating task list " << ba.what() << std::endl;
+#ifdef MPI_PARALLEL
+      MPI_Finalize();
+#endif
+      return(0);
+    }
+  }
+
+
 //--- Step 6. ----------------------------------------------------------------------------
 // Set initial conditions by calling problem generator, or reading restart file
 
@@ -383,6 +400,12 @@ int main(int argc, char *argv[]) {
     }
 
     if (pmesh->turb_flag > 1) pmesh->ptrbd->Driving(); // driven turbulence
+
+    if (pmesh->pdiff->diffusion_defined && pmesh->pdiff->operator_split) {
+      pmesh->pdiff->CalculateSubTimeSteps();
+      for (int step=1; step<=pmesh->pdiff->ndiffstep; ++step)
+        poslist->DoTaskListOneStage(pmesh, step);
+    }
 
     for (int stage=1; stage<=ptlist->nstages; ++stage) {
       if (SELF_GRAVITY_ENABLED == 1) // fft (flag 0 for discrete kernel, 1 for continuous)
@@ -496,6 +519,7 @@ int main(int argc, char *argv[]) {
   }
 
   delete pinput;
+  if (pmesh->pdiff->diffusion_defined && pmesh->pdiff->operator_split) delete poslist;
   delete pmesh;
   delete ptlist;
   delete pouts;

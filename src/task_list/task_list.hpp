@@ -69,6 +69,7 @@ class TaskState {
 class TaskList {
 friend class TimeIntegratorTaskList;
 friend class GravitySolverTaskList;
+friend class OperatorSplitTaskList;
 public:
   explicit TaskList(Mesh *pm);
   virtual ~TaskList();
