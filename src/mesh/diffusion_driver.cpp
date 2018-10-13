@@ -41,8 +41,8 @@ DiffusionDriver::DiffusionDriver(Mesh *pmy_mesh, ParameterInput *pin)
     phys_def[ISO_COND]=true;
   }
   if (MAGNETIC_FIELDS_ENABLED) {
-    if ((pin->GetOrAddReal("problem","eta_o",0.0) > 0.0) ||
-        (pin->GetOrAddReal("problem","eta_a",0.0) > 0.0)) {
+    if ((pin->GetOrAddReal("problem","eta_ohm",0.0) > 0.0) ||
+        (pin->GetOrAddReal("problem","eta_ad",0.0) > 0.0)) {
       phys_def[OAD]=true;
     }
   }
@@ -125,14 +125,14 @@ Real DiffusionDriver::UpdateDtAndDiffDt(Real dt, Real min_dt[NPHYS+1])
           mydt = dt_ratio[ndiffstep-1] * diff_dt;
         }
         else
-          diff_dt = dt/dt_ratio[ndiffstep-1];
+          diff_dt = mydt/dt_ratio[ndiffstep-1];
                 
         nu_sts = CalculateNuForSTS(ndiffstep);
       }
     }
     else // SUPER_TIMESTEPPING
     { // subcycling
-      ndiffstep = (int)(dt/diff_dt)+1;
+      ndiffstep = (int)(mydt/diff_dt)+1;
       if (ndiffstep == 1)
         diff_dt = mydt;
       else if (ndiffstep > ndiffmax)
@@ -144,7 +144,7 @@ Real DiffusionDriver::UpdateDtAndDiffDt(Real dt, Real min_dt[NPHYS+1])
   else // OPERATOR_SPLIT
   {// embedded to integrator
     ndiffstep = 1;
-    dt=std::min(diff_dt,mydt);
+    mydt=std::min(diff_dt,mydt);
     diff_dt = mydt;
   }
     

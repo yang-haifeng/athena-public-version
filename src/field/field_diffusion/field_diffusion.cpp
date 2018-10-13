@@ -36,9 +36,9 @@ FieldDiffusion::FieldDiffusion(MeshBlock *pmb, ParameterInput *pin)
   if (pmb->block_size.nx3 > 1) ncells3 = pmb->block_size.nx3 + 2*(NGHOST);
 
   // Check if field diffusion
-  eta_ohm = pin->GetOrAddReal("problem","eta_o",0.0);
-  eta_hall = pin->GetOrAddReal("problem","eta_h",0.0);
-  eta_ad = pin->GetOrAddReal("problem","eta_a",0.0);
+  eta_ohm = pin->GetOrAddReal("problem","eta_ohm",0.0);
+  eta_hall = pin->GetOrAddReal("problem","eta_hall",0.0);
+  eta_ad = pin->GetOrAddReal("problem","eta_ad",0.0);
 
   if ((eta_ohm != 0.0) || (eta_hall != 0.0) || (eta_ad != 0.0)) {
     field_diffusion_defined = true;
